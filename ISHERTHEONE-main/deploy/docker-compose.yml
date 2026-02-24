@@ -1,0 +1,147 @@
+# ═══════════════════════════════════════════════════════════════
+# Apex Citadel v3 — Docker Compose (Phase 0 + Phase 1)
+# Usage:
+#   docker-compose up -d redis
+#   docker-compose up -d brain shadowglass executioner antirug
+#   docker-compose up -d spoofhunter newtonian
+#   docker-compose up -d maestro_v3
+# ═══════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+x-common: &common
+  restart: unless-stopped
+  env_file: .env
+  networks:
+    - apex
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+services:
+  # ────── Infrastructure ──────
+  redis:
+    image: redis:7.4-alpine
+    <<: *common
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ────── v2 Legacy Nodes ──────
+  brain:
+    build: .
+    <<: *common
+    ports:
+      - "8000:8000"
+    command: uvicorn brain_engine:app --host 0.0.0.0 --port 8000 --workers 1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  shadowglass:
+    build: .
+    <<: *common
+    ports:
+      - "8001:8001"
+    command: uvicorn app_shadowglass:app --host 0.0.0.0 --port 8001 --workers 1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  executioner:
+    build: .
+    <<: *common
+    ports:
+      - "8002:8002"
+    command: uvicorn app_executioner:app --host 0.0.0.0 --port 8002 --workers 1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  antirug:
+    build: .
+    <<: *common
+    ports:
+      - "8003:8003"
+    command: uvicorn anti_rug_engine:app --host 0.0.0.0 --port 8003 --workers 1
+    volumes:
+      - antirug_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ────── v3 Phase 1 Nodes ──────
+  spoofhunter:
+    build: .
+    <<: *common
+    ports:
+      - "8012:8012"
+    command: uvicorn spoofhunter:app --host 0.0.0.0 --port 8012 --workers 1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  newtonian:
+    build: .
+    <<: *common
+    ports:
+      - "8011:8011"
+    command: uvicorn newtonian:app --host 0.0.0.0 --port 8011 --workers 1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ────── v3 Phase 0: Master Orchestrator ──────
+  maestro_v3:
+    build: .
+    <<: *common
+    ports:
+      - "8007:8007"
+    command: uvicorn maestro_v3:app --host 0.0.0.0 --port 8007 --workers 1
+    depends_on:
+      redis:
+        condition: service_healthy
+      brain:
+        condition: service_healthy
+    environment:
+      - MAESTRO_BRAIN_URL=http://brain:8000
+      - MAESTRO_SHADOW_URL=http://shadowglass:8001
+      - MAESTRO_EXEC_URL=http://executioner:8002
+      - MAESTRO_SPOOFHUNTER_URL=http://spoofhunter:8012
+      - MAESTRO_NEWTONIAN_URL=http://newtonian:8011
+      - MAESTRO_ANTIRUG_URL=http://antirug:8003
+      - REDIS_URL=redis://redis:6379/0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  redis_data:
+  antirug_data:
+
+networks:
+  apex:
+    driver: bridge
